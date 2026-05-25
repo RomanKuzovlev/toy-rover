@@ -1,0 +1,38 @@
+# colcon / CMake
+build/
+install/
+log/
+CMakeFiles/
+CMakeCache.txt
+compile_commands.json
+cmake_install.cmake
+CTestTestfile.cmake
+Testing/
+
+# compiled outputs
+*.a
+*.so
+*.o
+*.out
+*.exe
+
+# ROS / Gazebo runtime noise
+.ros/
+.gz/
+*.bag
+*.db3
+*.mcap
+
+# Python caches from launch tooling
+__pycache__/
+*.py[cod]
+
+# editor / local notes
+.vscode/
+.idea/
+*.swp
+roboticsLog.md
+
+# OS files
+.DS_Store
+Thumbs.db
