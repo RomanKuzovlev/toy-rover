@@ -5,8 +5,10 @@
 #include <vector>
 
 #include "control/pure_pursuit.hpp"
+#include "geometry_msgs/msg/pose_stamped.hpp"
 #include "geometry_msgs/msg/quaternion.hpp"
 #include "nav_msgs/msg/odometry.hpp"
+#include "nav_msgs/msg/path.hpp"
 #include "planning/astar.hpp"
 #include "rclcpp/rclcpp.hpp"
 
@@ -24,7 +26,8 @@ namespace
   class PlannerNode : public rclcpp::Node
   {
   public:
-    PlannerNode() : Node("planner_node")
+    PlannerNode() : Node("planner_node"),
+                    path_publisher_(create_publisher<nav_msgs::msg::Path>("planned_path", 10))
     {
       // ### planner node
       // input: occupancy grid, robot pose, goal
@@ -66,6 +69,7 @@ namespace
       auto route = planner_.plan(grid_, grid_start, grid_goal);
       if (!route)
       {
+        path_publisher_->publish(make_path_message({})); // send an empty msg as a signal to stop
         return;
       }
 
@@ -75,7 +79,7 @@ namespace
         world_path.push_back(grid_to_world(cell));
       }
 
-      // TODO send route to controller; controller should have actual route to execute on
+      path_publisher_->publish(make_path_message(world_path));
     }
 
     void on_odometry(const nav_msgs::msg::Odometry &msg)
@@ -105,7 +109,29 @@ namespace
       };
     }
 
+    nav_msgs::msg::Path make_path_message(const std::vector<toy_rover::control::Point2D> &world_path)
+    {
+      nav_msgs::msg::Path path_msg;
+      path_msg.header.stamp = now();
+      path_msg.header.frame_id = "map";
+      path_msg.poses.reserve(world_path.size());
+
+      for (const auto &point : world_path)
+      {
+        geometry_msgs::msg::PoseStamped pose;
+        pose.header = path_msg.header;
+        pose.pose.position.x = point.x;
+        pose.pose.position.y = point.y;
+        pose.pose.position.z = 0.0;
+        pose.pose.orientation.w = 1.0; // we are not interested in that rn - we just want to pass the coords
+        path_msg.poses.push_back(pose);
+      }
+
+      return path_msg;
+    }
+
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
+    rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_publisher_;
     std::optional<toy_rover::control::Pose2D> latest_pose_;
     toy_rover::mapping::OccupancyGrid grid_{80, 80, 0.1};
     toy_rover::planning::AStar planner_;
