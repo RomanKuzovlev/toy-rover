@@ -8,6 +8,7 @@
 #include "control/velocity_limiter.hpp"
 #include "geometry_msgs/msg/twist.hpp"
 #include "nav_msgs/msg/odometry.hpp"
+#include "nav_msgs/msg/path.hpp"
 #include "rclcpp/rclcpp.hpp"
 
 using namespace std::chrono_literals;
@@ -28,7 +29,6 @@ namespace
         : Node("controller_node"),
           tracker_(0.3, 0.15),
           limiter_(0.35, 1.2),
-          path_{{1.0, 0.0}, {2.0, 0.0}},
           cmd_pub_(create_publisher<geometry_msgs::msg::Twist>("cmd_vel", 10))
     {
       odom_sub_ = create_subscription<nav_msgs::msg::Odometry>(
@@ -37,6 +37,13 @@ namespace
           [this](const nav_msgs::msg::Odometry::SharedPtr msg)
           {
             on_odometry(*msg);
+          });
+      path_sub_ = create_subscription<nav_msgs::msg::Path>(
+          "planned_path",
+          10,
+          [this](const nav_msgs::msg::Path::SharedPtr msg)
+          {
+            on_path(*msg);
           });
       timer_ = create_wall_timer(50ms, [this]
                                  { on_timer(); });
@@ -68,6 +75,20 @@ namespace
       };
     }
 
+    void on_path(const nav_msgs::msg::Path &msg)
+    {
+      path_.clear();
+      path_.reserve(msg.poses.size());
+
+      for (const auto &pose_stamped : msg.poses)
+      {
+        path_.push_back(toy_rover::control::Point2D{
+            pose_stamped.pose.position.x,
+            pose_stamped.pose.position.y,
+        });
+      }
+    }
+
     void publish_stop()
     {
       cmd_pub_->publish(geometry_msgs::msg::Twist{});
@@ -80,6 +101,7 @@ namespace
     rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_pub_;
     rclcpp::TimerBase::SharedPtr timer_;
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
+    rclcpp::Subscription<nav_msgs::msg::Path>::SharedPtr path_sub_;
   };
 } // namespace
 

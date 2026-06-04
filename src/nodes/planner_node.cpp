@@ -52,7 +52,7 @@ namespace
 
   private:
     // TODO implement getting a goal from Gazebo
-    toy_rover::control::Point2D goal{2.0, 2.0};
+    toy_rover::control::Point2D goal{-3.0, -3.0};
     void on_timer()
     {
       if (!latest_pose_)
@@ -95,8 +95,8 @@ namespace
     {
       const double resolution = grid_.resolution_m();
       return toy_rover::mapping::GridIndex{
-          static_cast<int>(std::floor(point.x / resolution)),
-          static_cast<int>(std::floor(point.y / resolution)),
+          static_cast<int>(std::floor((point.x - grid_origin_.x) / resolution)),
+          static_cast<int>(std::floor((point.y - grid_origin_.y) / resolution)),
       };
     }
 
@@ -104,8 +104,8 @@ namespace
     {
       const double resolution = grid_.resolution_m();
       return toy_rover::control::Point2D{
-          (static_cast<double>(index.x) + 0.5) * resolution,
-          (static_cast<double>(index.y) + 0.5) * resolution,
+          (static_cast<double>(index.x) + 0.5) * resolution + grid_origin_.x,
+          (static_cast<double>(index.y) + 0.5) * resolution + grid_origin_.y,
       };
     }
 
@@ -133,6 +133,7 @@ namespace
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
     rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_publisher_;
     std::optional<toy_rover::control::Pose2D> latest_pose_;
+    toy_rover::control::Point2D grid_origin_{-4.0, -4.0};
     toy_rover::mapping::OccupancyGrid grid_{80, 80, 0.1};
     toy_rover::planning::AStar planner_;
     rclcpp::TimerBase::SharedPtr timer_;
