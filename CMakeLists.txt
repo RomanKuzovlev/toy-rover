@@ -16,6 +16,7 @@ find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
+find_package(sensor_msgs REQUIRED)
 
 add_library(${PROJECT_NAME}_core
   src/mapping/occupancy_grid.cpp
@@ -39,7 +40,7 @@ foreach(node
   add_executable(${node} src/nodes/${node}.cpp)
   target_link_libraries(${node} ${PROJECT_NAME}_core)
   ament_target_dependencies(${node}
-    rclcpp geometry_msgs nav_msgs
+    rclcpp geometry_msgs nav_msgs sensor_msgs
   )
 endforeach()
 
