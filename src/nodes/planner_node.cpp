@@ -1,5 +1,6 @@
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <vector>
@@ -7,6 +8,7 @@
 #include "control/pure_pursuit.hpp"
 #include "geometry_msgs/msg/pose_stamped.hpp"
 #include "geometry_msgs/msg/quaternion.hpp"
+#include "nav_msgs/msg/occupancy_grid.hpp"
 #include "nav_msgs/msg/odometry.hpp"
 #include "nav_msgs/msg/path.hpp"
 #include "planning/astar.hpp"
@@ -29,15 +31,6 @@ namespace
     PlannerNode() : Node("planner_node"),
                     path_publisher_(create_publisher<nav_msgs::msg::Path>("planned_path", 10))
     {
-      // ### planner node
-      // input: occupancy grid, robot pose, goal
-      // output: planned path
-
-      // responsibility:
-      //   convert world pose/goal to grid cells
-      //   run A*
-      //   convert grid path back to world coordinates
-      //   replan when map/goal/pose changes enough
       odom_sub_ = create_subscription<nav_msgs::msg::Odometry>(
           "odom",
           10,
@@ -45,6 +38,15 @@ namespace
           {
             on_odometry(*msg);
           });
+
+      grid_sub_ = create_subscription<nav_msgs::msg::OccupancyGrid>(
+          "map",
+          10,
+          [this](const nav_msgs::msg::OccupancyGrid::SharedPtr msg)
+          {
+            on_map(*msg);
+          });
+
       timer_ = create_wall_timer(std::chrono::milliseconds{50}, [this]
                                  { on_timer(); });
       RCLCPP_INFO(get_logger(), "planner node started");
@@ -55,7 +57,7 @@ namespace
     toy_rover::control::Point2D goal{-3.0, -3.0};
     void on_timer()
     {
-      if (!latest_pose_)
+      if (!latest_pose_ || !has_map_)
       {
         return;
       }
@@ -89,6 +91,49 @@ namespace
           msg.pose.pose.position.y,
           yaw_from_quaternion(msg.pose.pose.orientation),
       };
+    }
+
+    void on_map(const nav_msgs::msg::OccupancyGrid &msg)
+    {
+      if (msg.info.width != static_cast<std::uint32_t>(grid_.width()) ||
+          msg.info.height != static_cast<std::uint32_t>(grid_.height()) ||
+          std::abs(static_cast<double>(msg.info.resolution) - grid_.resolution_m()) > 1e-9)
+      {
+        RCLCPP_WARN_THROTTLE(
+            get_logger(),
+            *get_clock(),
+            2000,
+            "ignoring map with dimensions/resolution that do not match planner grid");
+        return;
+      }
+
+      grid_origin_ = toy_rover::control::Point2D{
+          msg.info.origin.position.x,
+          msg.info.origin.position.y,
+      };
+
+      for (int y = 0; y < grid_.height(); ++y)
+      {
+        for (int x = 0; x < grid_.width(); ++x)
+        {
+          const auto index = toy_rover::mapping::GridIndex{x, y};
+          const auto value = msg.data[grid_.linear_index(index)];
+          if (value >= static_cast<std::int8_t>(toy_rover::mapping::Cell::Occupied))
+          {
+            grid_.set(index, toy_rover::mapping::Cell::Occupied);
+          }
+          else if (value == static_cast<std::int8_t>(toy_rover::mapping::Cell::Free))
+          {
+            grid_.set(index, toy_rover::mapping::Cell::Free);
+          }
+          else
+          {
+            grid_.set(index, toy_rover::mapping::Cell::Unknown);
+          }
+        }
+      }
+
+      has_map_ = true;
     }
 
     toy_rover::mapping::GridIndex world_to_grid(const toy_rover::control::Point2D &point) const
@@ -131,8 +176,10 @@ namespace
     }
 
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
+    rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr grid_sub_;
     rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_publisher_;
     std::optional<toy_rover::control::Pose2D> latest_pose_;
+    bool has_map_{false};
     toy_rover::control::Point2D grid_origin_{-4.0, -4.0};
     toy_rover::mapping::OccupancyGrid grid_{80, 80, 0.1};
     toy_rover::planning::AStar planner_;
