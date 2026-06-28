@@ -47,14 +47,21 @@ namespace
             on_map(*msg);
           });
 
+      goal_pose_sub_ = create_subscription<geometry_msgs::msg::PoseStamped>(
+          "goal_pose",
+          10,
+          [this](const geometry_msgs::msg::PoseStamped::SharedPtr msg)
+          {
+            on_goal_pose(*msg);
+          });
+
       timer_ = create_wall_timer(std::chrono::milliseconds{50}, [this]
                                  { on_timer(); });
       RCLCPP_INFO(get_logger(), "planner node started");
     }
 
   private:
-    // TODO implement getting a goal from Gazebo
-    toy_rover::control::Point2D goal{-6.3, -6.1};
+    toy_rover::control::Point2D goal_{-6.3, -6.1};
     void on_timer()
     {
       if (!latest_pose_ || !has_map_)
@@ -65,7 +72,7 @@ namespace
 
       const toy_rover::control::Point2D world_start{latest_pose_->x, latest_pose_->y};
       const auto grid_start = world_to_grid(world_start);
-      const auto grid_goal = world_to_grid(goal);
+      const auto grid_goal = world_to_grid(goal_);
 
       std::vector<toy_rover::control::Point2D> world_path;
 
@@ -93,6 +100,17 @@ namespace
           msg.pose.pose.position.y,
           yaw_from_quaternion(msg.pose.pose.orientation),
       };
+    }
+
+    void on_goal_pose(const geometry_msgs::msg::PoseStamped &msg)
+    {
+      set_goal(msg.pose.position.x, msg.pose.position.y);
+    }
+
+    void set_goal(double x, double y)
+    {
+      goal_ = toy_rover::control::Point2D{x, y};
+      RCLCPP_INFO(get_logger(), "planner goal set to x=%.2f y=%.2f", goal_.x, goal_.y);
     }
 
     void on_map(const nav_msgs::msg::OccupancyGrid &msg)
@@ -179,6 +197,7 @@ namespace
 
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
     rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr grid_sub_;
+    rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr goal_pose_sub_;
     rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_publisher_;
     std::optional<toy_rover::control::Pose2D> latest_pose_;
     bool has_map_{false};
