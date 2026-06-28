@@ -24,7 +24,7 @@ namespace
   public:
     MappingNode()
         : Node("mapping_node"),
-          grid_(80, 80, 0.1),
+          grid_(140, 140, 0.1),
           grid_pub_(create_publisher<nav_msgs::msg::OccupancyGrid>("map", 10))
     {
       scan_sub_ = create_subscription<sensor_msgs::msg::LaserScan>(
@@ -122,7 +122,7 @@ namespace
     }
 
     toy_rover::mapping::OccupancyGrid grid_;
-    toy_rover::control::Point2D grid_origin_{-4.0, -4.0};
+    toy_rover::control::Point2D grid_origin_{-7.0, -7.0};
     std::optional<toy_rover::control::Pose2D> latest_pose_;
     rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr scan_sub_;
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;

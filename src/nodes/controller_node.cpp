@@ -55,7 +55,8 @@ namespace
     {
       if (!latest_pose_)
       {
-        publish_stop();
+        RCLCPP_WARN(get_logger(), "No odometry received yet; publishing stop command");
+        // publish_stop();
         return;
       }
 

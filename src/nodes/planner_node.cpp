@@ -54,11 +54,12 @@ namespace
 
   private:
     // TODO implement getting a goal from Gazebo
-    toy_rover::control::Point2D goal{-3.0, -3.0};
+    toy_rover::control::Point2D goal{-6.3, -6.1};
     void on_timer()
     {
       if (!latest_pose_ || !has_map_)
       {
+        RCLCPP_WARN(get_logger(), "Planner skips planning (no latest_pose or doesn't have a map)");
         return;
       }
 
@@ -72,6 +73,7 @@ namespace
       if (!route)
       {
         path_publisher_->publish(make_path_message({})); // send an empty msg as a signal to stop
+        RCLCPP_WARN(get_logger(), "Planner sends an empty msg as a signal to stop");
         return;
       }
 
@@ -97,7 +99,7 @@ namespace
     {
       if (msg.info.width != static_cast<std::uint32_t>(grid_.width()) ||
           msg.info.height != static_cast<std::uint32_t>(grid_.height()) ||
-          std::abs(static_cast<double>(msg.info.resolution) - grid_.resolution_m()) > 1e-9)
+          std::abs(static_cast<double>(msg.info.resolution) - grid_.resolution_m()) > 1e-6)
       {
         RCLCPP_WARN_THROTTLE(
             get_logger(),
@@ -180,8 +182,8 @@ namespace
     rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_publisher_;
     std::optional<toy_rover::control::Pose2D> latest_pose_;
     bool has_map_{false};
-    toy_rover::control::Point2D grid_origin_{-4.0, -4.0};
-    toy_rover::mapping::OccupancyGrid grid_{80, 80, 0.1};
+    toy_rover::control::Point2D grid_origin_{-7.0, -7.0};
+    toy_rover::mapping::OccupancyGrid grid_{140, 140, 0.1};
     toy_rover::planning::AStar planner_;
     rclcpp::TimerBase::SharedPtr timer_;
   };

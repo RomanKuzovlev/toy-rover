@@ -3,8 +3,16 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <optional>
 #include <queue>
 #include <unordered_map>
+
+enum class PlanFailure
+{
+  StartNotTraversable,
+  GoalNotTraversable,
+  NoPath
+};
 
 namespace toy_rover::planning
 {
@@ -51,11 +59,6 @@ namespace toy_rover::planning
       mapping::GridIndex start,
       mapping::GridIndex goal) const
   {
-    if (!traversable(grid, start) || !traversable(grid, goal))
-    {
-      return std::nullopt;
-    }
-
     std::priority_queue<Node, std::vector<Node>, NodeGreater> open;
     std::unordered_map<int, mapping::GridIndex> came_from;
     std::unordered_map<int, double> g_score;
