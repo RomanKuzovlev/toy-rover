@@ -7,13 +7,6 @@
 #include <queue>
 #include <unordered_map>
 
-enum class PlanFailure
-{
-  StartNotTraversable,
-  GoalNotTraversable,
-  NoPath
-};
-
 namespace toy_rover::planning
 {
 

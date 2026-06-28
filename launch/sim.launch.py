@@ -12,10 +12,12 @@ def generate_launch_description():
     package_share = FindPackageShare("toy_rover")
     use_sim_time = LaunchConfiguration("use_sim_time")
     start_core_nodes = LaunchConfiguration("start_core_nodes")
+    start_rviz = LaunchConfiguration("start_rviz")
 
     world = PathJoinSubstitution([package_share, "worlds", "mini_maze.world"])
     rover_xacro = PathJoinSubstitution([package_share, "urdf", "rover.urdf.xacro"])
     bridge_config = PathJoinSubstitution([package_share, "config", "ros_gz_bridge.yaml"])
+    rviz_config = PathJoinSubstitution([package_share, "config", "toy_rover.rviz"])
 
     robot_description = ParameterValue(
         Command(["xacro ", rover_xacro]),
@@ -71,12 +73,31 @@ def generate_launch_description():
         parameters=[{"config_file": bridge_config}],
     )
 
+    map_to_odom_tf = Node(
+        package="tf2_ros",
+        executable="static_transform_publisher",
+        name="map_to_odom_tf",
+        arguments=["0", "0", "0", "0", "0", "0", "map", "odom"],
+        parameters=[{"use_sim_time": use_sim_time}],
+    )
+
+    rviz = Node(
+        package="rviz2",
+        executable="rviz2",
+        name="rviz2",
+        output="screen",
+        arguments=["-d", rviz_config],
+        parameters=[{"use_sim_time": use_sim_time}],
+        condition=IfCondition(start_rviz),
+    )
+
     core_nodes = [
         Node(
             package="toy_rover",
             executable="mapping_node",
             name="mapping_node",
             output="screen",
+            parameters=[{"use_sim_time": use_sim_time}],
             condition=IfCondition(start_core_nodes),
         ),
         Node(
@@ -84,6 +105,7 @@ def generate_launch_description():
             executable="planner_node",
             name="planner_node",
             output="screen",
+            parameters=[{"use_sim_time": use_sim_time}],
             condition=IfCondition(start_core_nodes),
         ),
         Node(
@@ -91,6 +113,7 @@ def generate_launch_description():
             executable="controller_node",
             name="controller_node",
             output="screen",
+            parameters=[{"use_sim_time": use_sim_time}],
             condition=IfCondition(start_core_nodes),
         ),
     ]
@@ -98,9 +121,12 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument("use_sim_time", default_value="true"),
         DeclareLaunchArgument("start_core_nodes", default_value="true"),
+        DeclareLaunchArgument("start_rviz", default_value="true"),
         gazebo,
         robot_state_publisher,
         spawn_rover,
         bridge,
+        map_to_odom_tf,
+        rviz,
         *core_nodes,
     ])
