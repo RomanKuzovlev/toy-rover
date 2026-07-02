@@ -17,6 +17,7 @@ find_package(rclcpp REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(tf2_ros REQUIRED)
 
 add_library(${PROJECT_NAME}_core
   src/mapping/occupancy_grid.cpp
@@ -36,11 +37,12 @@ foreach(node
   mapping_node
   planner_node
   controller_node
+  odom_tf_broadcaster_node
 )
   add_executable(${node} src/nodes/${node}.cpp)
   target_link_libraries(${node} ${PROJECT_NAME}_core)
   ament_target_dependencies(${node}
-    rclcpp geometry_msgs nav_msgs sensor_msgs
+    rclcpp geometry_msgs nav_msgs sensor_msgs tf2_ros
   )
 endforeach()
 
@@ -49,6 +51,7 @@ install(TARGETS
   mapping_node
   planner_node
   controller_node
+  odom_tf_broadcaster_node
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION lib/${PROJECT_NAME}

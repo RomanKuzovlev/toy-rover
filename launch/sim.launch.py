@@ -94,6 +94,13 @@ def generate_launch_description():
     core_nodes = [
         Node(
             package="toy_rover",
+            executable="odom_tf_broadcaster_node",
+            name="odom_tf_broadcaster",
+            output="screen",
+            parameters=[{"use_sim_time": use_sim_time}],
+        ),
+        Node(
+            package="toy_rover",
             executable="mapping_node",
             name="mapping_node",
             output="screen",
