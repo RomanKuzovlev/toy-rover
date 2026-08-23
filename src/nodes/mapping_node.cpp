@@ -1,9 +1,10 @@
 #include <chrono>
 #include <cmath>
+#include <deque>
 #include <memory>
-#include <optional>
 #include <vector>
 
+#include "control/pose_history.hpp"
 #include "control/pure_pursuit.hpp"
 #include "control/stuck_detector.hpp"
 #include "geometry_msgs/msg/quaternion.hpp"
@@ -29,7 +30,10 @@ namespace
   public:
     MappingNode()
         : Node("mapping_node"),
-          grid_(140, 140, 0.1),
+          grid_(280, 280, 0.1),
+          pose_history_(std::chrono::duration_cast<std::chrono::nanoseconds>(
+              std::chrono::duration<double>(
+                  declare_parameter<double>("odometry_history_seconds", 2.0)))),
           obstacle_history_(std::chrono::duration_cast<std::chrono::nanoseconds>(
               std::chrono::duration<double>(
                   declare_parameter<double>("obstacle_retention_seconds", 3.0)))),
@@ -38,6 +42,9 @@ namespace
                   std::chrono::duration<double>(
                       declare_parameter<double>("stuck_detection_window_seconds", 2.0))),
               declare_parameter<int>("stuck_cell_tolerance", 1)),
+          enable_stuck_recovery_(declare_parameter<bool>("enable_stuck_recovery", false)),
+          lidar_offset_x_m_(declare_parameter<double>("lidar_offset_x_m", 0.08)),
+          lidar_offset_y_m_(declare_parameter<double>("lidar_offset_y_m", 0.0)),
           grid_pub_(create_publisher<nav_msgs::msg::OccupancyGrid>("map", 10)),
           unblock_pub_(create_publisher<std_msgs::msg::Empty>("unblock", 10))
     {
@@ -63,10 +70,27 @@ namespace
   private:
     void on_scan(const sensor_msgs::msg::LaserScan &msg)
     {
-      if (!latest_pose_)
+      if (pending_scans_.size() == max_pending_scans_)
       {
-        return;
+        pending_scans_.pop_front();
+        RCLCPP_WARN_THROTTLE(
+            get_logger(), *get_clock(), 2000,
+            "Odometry did not catch up with scans; dropping oldest pending scan");
       }
+      pending_scans_.push_back(msg);
+      process_pending_scans();
+    }
+
+    void process_scan(
+        const sensor_msgs::msg::LaserScan &msg,
+        const toy_rover::control::Pose2D &base_pose)
+    {
+      const double cos_yaw = std::cos(base_pose.yaw_rad);
+      const double sin_yaw = std::sin(base_pose.yaw_rad);
+      const toy_rover::control::Point2D lidar_origin{
+          base_pose.x + cos_yaw * lidar_offset_x_m_ - sin_yaw * lidar_offset_y_m_,
+          base_pose.y + sin_yaw * lidar_offset_x_m_ + cos_yaw * lidar_offset_y_m_,
+      };
 
       std::vector<toy_rover::mapping::GridIndex> occupied_cells;
       occupied_cells.reserve(msg.ranges.size());
@@ -79,10 +103,10 @@ namespace
         }
 
         const double scan_angle = msg.angle_min + static_cast<double>(i) * msg.angle_increment;
-        const double world_angle = latest_pose_->yaw_rad + scan_angle;
+        const double world_angle = base_pose.yaw_rad + scan_angle;
         const toy_rover::control::Point2D hit{
-            latest_pose_->x + std::cos(world_angle) * range,
-            latest_pose_->y + std::sin(world_angle) * range,
+            lidar_origin.x + std::cos(world_angle) * range,
+            lidar_origin.y + std::sin(world_angle) * range,
         };
 
         const auto cell = world_to_grid(hit);
@@ -99,6 +123,35 @@ namespace
       grid_pub_->publish(make_grid_message());
     }
 
+    void process_pending_scans()
+    {
+      while (!pending_scans_.empty())
+      {
+        const auto &scan = pending_scans_.front();
+        const auto scan_timestamp =
+            std::chrono::nanoseconds{rclcpp::Time(scan.header.stamp).nanoseconds()};
+        const auto pose = pose_history_.interpolate(scan_timestamp);
+        if (pose)
+        {
+          process_scan(scan, *pose);
+          pending_scans_.pop_front();
+          continue;
+        }
+
+        const auto latest_odom = pose_history_.latest_timestamp();
+        if (!latest_odom || scan_timestamp > *latest_odom)
+        {
+          return;
+        }
+
+        // The scan predates retained odometry and can never be interpolated.
+        pending_scans_.pop_front();
+        RCLCPP_WARN_THROTTLE(
+            get_logger(), *get_clock(), 2000,
+            "Dropping scan older than retained odometry history");
+      }
+    }
+
     void on_odometry(const nav_msgs::msg::Odometry &msg)
     {
       const toy_rover::control::Pose2D pose{
@@ -106,16 +159,23 @@ namespace
           msg.pose.pose.position.y,
           yaw_from_quaternion(msg.pose.pose.orientation),
       };
-      latest_pose_ = pose;
-
-      const auto cell = world_to_grid({pose.x, pose.y});
       const auto timestamp =
           std::chrono::nanoseconds{rclcpp::Time(msg.header.stamp).nanoseconds()};
-      if (stuck_detector_.update(timestamp, cell))
+      const auto previous_timestamp = pose_history_.latest_timestamp();
+      if (previous_timestamp && timestamp < *previous_timestamp)
+      {
+        pending_scans_.clear();
+      }
+      pose_history_.add(timestamp, pose);
+
+      const auto cell = world_to_grid({pose.x, pose.y});
+      if (enable_stuck_recovery_ && stuck_detector_.update(timestamp, cell))
       {
         unblock_pub_->publish(std_msgs::msg::Empty{});
         RCLCPP_WARN(get_logger(), "Rover appears stuck; publishing unblock event");
       }
+
+      process_pending_scans();
     }
 
     toy_rover::mapping::GridIndex world_to_grid(const toy_rover::control::Point2D &point) const
@@ -147,10 +207,15 @@ namespace
     }
 
     toy_rover::mapping::OccupancyGrid grid_;
+    toy_rover::control::PoseHistory pose_history_;
     toy_rover::mapping::ObstacleHistory obstacle_history_;
     toy_rover::control::StuckDetector stuck_detector_;
-    toy_rover::control::Point2D grid_origin_{-7.0, -7.0};
-    std::optional<toy_rover::control::Pose2D> latest_pose_;
+    bool enable_stuck_recovery_;
+    toy_rover::control::Point2D grid_origin_{-14.0, -14.0};
+    double lidar_offset_x_m_;
+    double lidar_offset_y_m_;
+    static constexpr std::size_t max_pending_scans_{20};
+    std::deque<sensor_msgs::msg::LaserScan> pending_scans_;
     rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr scan_sub_;
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
     rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr grid_pub_;

@@ -35,3 +35,9 @@ TEST(AStar, ReturnsNoPathWhenGoalBlocked) {
 
   EXPECT_FALSE(path.has_value());
 }
+
+TEST(AStar, ReturnsNoPathWhenStartIsOutsideGrid) {
+  OccupancyGrid grid(3, 3, 0.1);
+
+  EXPECT_FALSE(AStar{}.plan(grid, {-1, 0}, {2, 2}).has_value());
+}

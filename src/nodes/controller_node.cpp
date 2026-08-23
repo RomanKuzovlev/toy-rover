@@ -29,8 +29,8 @@ namespace
   public:
     ControllerNode()
         : Node("controller_node"),
-          tracker_(0.3, 0.15),
-          limiter_(0.35, 1.2),
+          tracker_(0.35, 0.20),
+          limiter_(0.40, 1.5),
           reverse_speed_mps_(declare_parameter<double>("unblock_reverse_speed_mps", 0.15)),
           reverse_duration_(rclcpp::Duration::from_seconds(
               declare_parameter<double>("unblock_reverse_duration_seconds", 1.0))),
@@ -72,8 +72,10 @@ namespace
     {
       if (!latest_pose_)
       {
-        RCLCPP_WARN(get_logger(), "No odometry received yet; publishing stop command");
-        // publish_stop();
+        RCLCPP_WARN_THROTTLE(
+            get_logger(), *get_clock(), 2000,
+            "No odometry received yet; publishing stop command");
+        publish_stop();
         return;
       }
 

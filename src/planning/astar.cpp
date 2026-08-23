@@ -52,6 +52,13 @@ namespace toy_rover::planning
       mapping::GridIndex start,
       mapping::GridIndex goal) const
   {
+    if (!grid.in_bounds(start) || !grid.in_bounds(goal) ||
+        grid.at(start) == mapping::Cell::Occupied ||
+        grid.at(goal) == mapping::Cell::Occupied)
+    {
+      return std::nullopt;
+    }
+
     std::priority_queue<Node, std::vector<Node>, NodeGreater> open;
     std::unordered_map<int, mapping::GridIndex> came_from;
     std::unordered_map<int, double> g_score;

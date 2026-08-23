@@ -1,5 +1,6 @@
 #include "control/pure_pursuit.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <stdexcept>
 
@@ -18,6 +19,14 @@ namespace toy_rover::control
   Twist2D PurePursuit::compute_command(const Pose2D &pose, const std::vector<Point2D> &path) const
   {
     if (path.empty())
+    {
+      return {};
+    }
+
+    const double goal_dx = path.back().x - pose.x;
+    const double goal_dy = path.back().y - pose.y;
+    constexpr double goal_tolerance_m = 0.15;
+    if (std::hypot(goal_dx, goal_dy) <= goal_tolerance_m)
     {
       return {};
     }
@@ -41,7 +50,15 @@ namespace toy_rover::control
         std::sin(target_angle - pose.yaw_rad),
         std::cos(target_angle - pose.yaw_rad));
 
-    return {nominal_speed_mps_, 2.0 * heading_error};
+    // Do not drive a forward arc when the path is substantially behind the
+    // rover. Turn first, then advance with speed reduced by heading error.
+    constexpr double rotate_in_place_threshold_rad = 0.8;
+    const double linear_speed =
+        std::abs(heading_error) >= rotate_in_place_threshold_rad
+            ? 0.0
+            : nominal_speed_mps_ * std::max(0.25, std::cos(heading_error));
+
+    return {linear_speed, 2.0 * heading_error};
   }
 
 } // namespace toy_rover::control
