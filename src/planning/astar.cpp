@@ -12,6 +12,8 @@ namespace toy_rover::planning
 
   namespace
   {
+    constexpr double diagonal_cost = 1.4142135623730951;
+
     struct Node
     {
       mapping::GridIndex index;
@@ -31,18 +33,31 @@ namespace toy_rover::planning
       return index.y * grid.width() + index.x;
     }
 
+    struct Neighbor
+    {
+      mapping::GridIndex index;
+      double cost;
+      bool diagonal;
+    };
+
     double heuristic(mapping::GridIndex a, mapping::GridIndex b)
     {
-      return std::abs(a.x - b.x) + std::abs(a.y - b.y);
+      const double dx = std::abs(a.x - b.x);
+      const double dy = std::abs(a.y - b.y);
+      return std::max(dx, dy) + (diagonal_cost - 1.0) * std::min(dx, dy);
     }
 
-    std::vector<mapping::GridIndex> neighbors(mapping::GridIndex index)
+    std::vector<Neighbor> neighbors(mapping::GridIndex index)
     {
       return {
-          {index.x + 1, index.y},
-          {index.x - 1, index.y},
-          {index.x, index.y + 1},
-          {index.x, index.y - 1},
+          {{index.x + 1, index.y}, 1.0, false},
+          {{index.x - 1, index.y}, 1.0, false},
+          {{index.x, index.y + 1}, 1.0, false},
+          {{index.x, index.y - 1}, 1.0, false},
+          {{index.x + 1, index.y + 1}, diagonal_cost, true},
+          {{index.x + 1, index.y - 1}, diagonal_cost, true},
+          {{index.x - 1, index.y + 1}, diagonal_cost, true},
+          {{index.x - 1, index.y - 1}, diagonal_cost, true},
       };
     }
   } // namespace
@@ -94,14 +109,25 @@ namespace toy_rover::planning
       }
 
       const double current_g = g_score.at(key(grid, current));
-      for (const auto next : neighbors(current))
+      for (const auto &neighbor : neighbors(current))
       {
+        const auto next = neighbor.index;
         if (!traversable(grid, next))
         {
           continue;
         }
 
-        const double tentative_g = current_g + 1.0;
+        if (neighbor.diagonal)
+        {
+          const mapping::GridIndex horizontal{next.x, current.y};
+          const mapping::GridIndex vertical{current.x, next.y};
+          if (!traversable(grid, horizontal) || !traversable(grid, vertical))
+          {
+            continue;
+          }
+        }
+
+        const double tentative_g = current_g + neighbor.cost;
         const int next_key = key(grid, next);
         const auto known = g_score.find(next_key);
         if (known != g_score.end() && tentative_g >= known->second)
