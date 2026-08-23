@@ -21,6 +21,7 @@ find_package(tf2_ros REQUIRED)
 
 add_library(${PROJECT_NAME}_core
   src/mapping/occupancy_grid.cpp
+  src/mapping/obstacle_history.cpp
   src/planning/astar.cpp
   src/control/pure_pursuit.cpp
   src/control/velocity_limiter.cpp
@@ -67,6 +68,10 @@ if(BUILD_TESTING)
   ament_add_gtest(test_astar test/test_astar.cpp)
   target_link_libraries(test_astar ${PROJECT_NAME}_core)
   target_include_directories(test_astar PRIVATE src)
+
+  ament_add_gtest(test_obstacle_history test/test_obstacle_history.cpp)
+  target_link_libraries(test_obstacle_history ${PROJECT_NAME}_core)
+  target_include_directories(test_obstacle_history PRIVATE src)
 endif()
 
 ament_package()

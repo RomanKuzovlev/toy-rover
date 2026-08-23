@@ -38,6 +38,7 @@ namespace toy_rover::mapping
 
     [[nodiscard]] Cell at(GridIndex index) const;
     void set(GridIndex index, Cell value);
+    void fill(Cell value) noexcept;
 
     [[nodiscard]] std::size_t linear_index(GridIndex index) const;
     [[nodiscard]] const std::vector<Cell> &cells() const noexcept;

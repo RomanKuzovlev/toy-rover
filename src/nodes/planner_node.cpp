@@ -64,11 +64,11 @@ namespace
     toy_rover::control::Point2D goal_{-6.3, -6.1};
     void on_timer()
     {
-      if (!latest_pose_ || !has_map_)
-      {
-        RCLCPP_WARN(get_logger(), "Planner skips planning (no latest_pose or doesn't have a map)");
-        return;
-      }
+      // if (!latest_pose_ || !has_map_)
+      // {
+      //   RCLCPP_WARN(get_logger(), "Planner skips planning (no latest_pose or doesn't have a map)");
+      //   return;
+      // }
 
       const toy_rover::control::Point2D world_start{latest_pose_->x, latest_pose_->y};
       const auto grid_start = world_to_grid(world_start);

@@ -1,5 +1,6 @@
 #include "mapping/occupancy_grid.hpp"
 
+#include <algorithm>
 #include <stdexcept>
 
 namespace toy_rover::mapping
@@ -48,6 +49,11 @@ namespace toy_rover::mapping
       throw std::out_of_range("grid index out of bounds");
     }
     cells_[linear_index(index)] = value;
+  }
+
+  void OccupancyGrid::fill(Cell value) noexcept
+  {
+    std::fill(cells_.begin(), cells_.end(), value);
   }
 
   std::size_t OccupancyGrid::linear_index(GridIndex index) const

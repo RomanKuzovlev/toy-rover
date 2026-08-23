@@ -1,9 +1,12 @@
+#include <chrono>
 #include <cmath>
 #include <memory>
 #include <optional>
+#include <vector>
 
 #include "control/pure_pursuit.hpp"
 #include "geometry_msgs/msg/quaternion.hpp"
+#include "mapping/obstacle_history.hpp"
 #include "mapping/occupancy_grid.hpp"
 #include "nav_msgs/msg/occupancy_grid.hpp"
 #include "nav_msgs/msg/odometry.hpp"
@@ -25,6 +28,9 @@ namespace
     MappingNode()
         : Node("mapping_node"),
           grid_(140, 140, 0.1),
+          obstacle_history_(std::chrono::duration_cast<std::chrono::nanoseconds>(
+              std::chrono::duration<double>(
+                  declare_parameter<double>("obstacle_retention_seconds", 3.0)))),
           grid_pub_(create_publisher<nav_msgs::msg::OccupancyGrid>("map", 10))
     {
       scan_sub_ = create_subscription<sensor_msgs::msg::LaserScan>(
@@ -54,7 +60,8 @@ namespace
         return;
       }
 
-      bool changed = false;
+      std::vector<toy_rover::mapping::GridIndex> occupied_cells;
+      occupied_cells.reserve(msg.ranges.size());
       for (std::size_t i = 0; i < msg.ranges.size(); ++i)
       {
         const float range = msg.ranges[i];
@@ -73,15 +80,15 @@ namespace
         const auto cell = world_to_grid(hit);
         if (grid_.in_bounds(cell))
         {
-          grid_.set(cell, toy_rover::mapping::Cell::Occupied);
-          changed = true;
+          occupied_cells.push_back(cell);
         }
       }
 
-      if (changed)
-      {
-        grid_pub_->publish(make_grid_message());
-      }
+      obstacle_history_.update(
+          std::chrono::nanoseconds{rclcpp::Time(msg.header.stamp).nanoseconds()},
+          std::move(occupied_cells),
+          grid_);
+      grid_pub_->publish(make_grid_message());
     }
 
     void on_odometry(const nav_msgs::msg::Odometry &msg)
@@ -122,6 +129,7 @@ namespace
     }
 
     toy_rover::mapping::OccupancyGrid grid_;
+    toy_rover::mapping::ObstacleHistory obstacle_history_;
     toy_rover::control::Point2D grid_origin_{-7.0, -7.0};
     std::optional<toy_rover::control::Pose2D> latest_pose_;
     rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr scan_sub_;

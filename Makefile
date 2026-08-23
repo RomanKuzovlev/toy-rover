@@ -23,10 +23,6 @@ test:
 
 launch:
 	source $(ROS_SETUP) && source $(LOCAL_SETUP) && \
-		ros2 launch $(PACKAGE) sim.launch.py start_core_nodes:=false
-
-launch-core:
-	source $(ROS_SETUP) && source $(LOCAL_SETUP) && \
 		ros2 launch $(PACKAGE) sim.launch.py start_core_nodes:=true
 
 clean:
