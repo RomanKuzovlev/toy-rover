@@ -17,11 +17,13 @@ find_package(rclcpp REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(std_msgs REQUIRED)
 find_package(tf2_ros REQUIRED)
 
 add_library(${PROJECT_NAME}_core
   src/mapping/occupancy_grid.cpp
   src/mapping/obstacle_history.cpp
+  src/control/stuck_detector.cpp
   src/planning/astar.cpp
   src/control/pure_pursuit.cpp
   src/control/velocity_limiter.cpp
@@ -43,7 +45,7 @@ foreach(node
   add_executable(${node} src/nodes/${node}.cpp)
   target_link_libraries(${node} ${PROJECT_NAME}_core)
   ament_target_dependencies(${node}
-    rclcpp geometry_msgs nav_msgs sensor_msgs tf2_ros
+    rclcpp geometry_msgs nav_msgs sensor_msgs std_msgs tf2_ros
   )
 endforeach()
 
@@ -72,6 +74,10 @@ if(BUILD_TESTING)
   ament_add_gtest(test_obstacle_history test/test_obstacle_history.cpp)
   target_link_libraries(test_obstacle_history ${PROJECT_NAME}_core)
   target_include_directories(test_obstacle_history PRIVATE src)
+
+  ament_add_gtest(test_stuck_detector test/test_stuck_detector.cpp)
+  target_link_libraries(test_stuck_detector ${PROJECT_NAME}_core)
+  target_include_directories(test_stuck_detector PRIVATE src)
 endif()
 
 ament_package()

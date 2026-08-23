@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "control/pure_pursuit.hpp"
+#include "control/stuck_detector.hpp"
 #include "geometry_msgs/msg/quaternion.hpp"
 #include "mapping/obstacle_history.hpp"
 #include "mapping/occupancy_grid.hpp"
@@ -12,6 +13,7 @@
 #include "nav_msgs/msg/odometry.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "sensor_msgs/msg/laser_scan.hpp"
+#include "std_msgs/msg/empty.hpp"
 
 namespace
 {
@@ -31,7 +33,13 @@ namespace
           obstacle_history_(std::chrono::duration_cast<std::chrono::nanoseconds>(
               std::chrono::duration<double>(
                   declare_parameter<double>("obstacle_retention_seconds", 3.0)))),
-          grid_pub_(create_publisher<nav_msgs::msg::OccupancyGrid>("map", 10))
+          stuck_detector_(
+              std::chrono::duration_cast<std::chrono::nanoseconds>(
+                  std::chrono::duration<double>(
+                      declare_parameter<double>("stuck_detection_window_seconds", 2.0))),
+              declare_parameter<int>("stuck_cell_tolerance", 1)),
+          grid_pub_(create_publisher<nav_msgs::msg::OccupancyGrid>("map", 10)),
+          unblock_pub_(create_publisher<std_msgs::msg::Empty>("unblock", 10))
     {
       scan_sub_ = create_subscription<sensor_msgs::msg::LaserScan>(
           "scan",
@@ -93,11 +101,21 @@ namespace
 
     void on_odometry(const nav_msgs::msg::Odometry &msg)
     {
-      latest_pose_ = toy_rover::control::Pose2D{
+      const toy_rover::control::Pose2D pose{
           msg.pose.pose.position.x,
           msg.pose.pose.position.y,
           yaw_from_quaternion(msg.pose.pose.orientation),
       };
+      latest_pose_ = pose;
+
+      const auto cell = world_to_grid({pose.x, pose.y});
+      const auto timestamp =
+          std::chrono::nanoseconds{rclcpp::Time(msg.header.stamp).nanoseconds()};
+      if (stuck_detector_.update(timestamp, cell))
+      {
+        unblock_pub_->publish(std_msgs::msg::Empty{});
+        RCLCPP_WARN(get_logger(), "Rover appears stuck; publishing unblock event");
+      }
     }
 
     toy_rover::mapping::GridIndex world_to_grid(const toy_rover::control::Point2D &point) const
@@ -130,11 +148,13 @@ namespace
 
     toy_rover::mapping::OccupancyGrid grid_;
     toy_rover::mapping::ObstacleHistory obstacle_history_;
+    toy_rover::control::StuckDetector stuck_detector_;
     toy_rover::control::Point2D grid_origin_{-7.0, -7.0};
     std::optional<toy_rover::control::Pose2D> latest_pose_;
     rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr scan_sub_;
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
     rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr grid_pub_;
+    rclcpp::Publisher<std_msgs::msg::Empty>::SharedPtr unblock_pub_;
   };
 } // namespace
 
