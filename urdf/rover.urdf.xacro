@@ -100,7 +100,7 @@
     <material>Gazebo/Black</material>
     <sensor name="lidar" type="gpu_lidar">
       <topic>/scan</topic>
-      <update_rate>10</update_rate>
+      <update_rate>20</update_rate>
       <always_on>true</always_on>
       <visualize>true</visualize>
       <ray>

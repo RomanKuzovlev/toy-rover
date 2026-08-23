@@ -33,14 +33,17 @@ namespace
     ControllerNode()
         : Node("controller_node"),
           tracker_(
-              declare_parameter<double>("lookahead_m", 0.45),
-              declare_parameter<double>("cruise_speed_mps", 0.35)),
+              declare_parameter<double>("lookahead_m", 0.65),
+              declare_parameter<double>("cruise_speed_mps", 0.80)),
           limiter_(
-              declare_parameter<double>("max_linear_speed_mps", 0.55),
-              declare_parameter<double>("max_angular_speed_radps", 1.8)),
-          recovery_speed_mps_(declare_parameter<double>("recovery_speed_mps", 0.22)),
+              declare_parameter<double>("max_linear_speed_mps", 1.00),
+              declare_parameter<double>("max_angular_speed_radps", 2.5)),
+          recovery_speed_mps_(declare_parameter<double>("recovery_speed_mps", 0.60)),
           recovery_drive_duration_(declare_parameter<double>(
               "recovery_drive_duration_seconds", 1.5)),
+          recovery_turn_gain_(declare_parameter<double>("recovery_turn_gain", 3.0)),
+          recovery_max_angular_radps_(declare_parameter<double>(
+              "recovery_max_angular_radps", 2.2)),
           recovery_stop_clearance_m_(declare_parameter<double>(
               "recovery_stop_clearance_m", 0.45)),
           recovery_corridor_half_angle_rad_(declare_parameter<double>(
@@ -48,6 +51,7 @@ namespace
           cmd_pub_(create_publisher<geometry_msgs::msg::Twist>("cmd_vel", 10))
     {
       if (recovery_speed_mps_ <= 0.0 || recovery_drive_duration_.count() <= 0.0 ||
+          recovery_turn_gain_ <= 0.0 || recovery_max_angular_radps_ <= 0.0 ||
           recovery_stop_clearance_m_ <= 0.0 || recovery_corridor_half_angle_rad_ <= 0.0)
       {
         throw std::invalid_argument("recovery parameters must be positive");
@@ -179,7 +183,10 @@ namespace
         if (std::abs(error) > heading_tolerance_rad)
         {
           geometry_msgs::msg::Twist command;
-          command.angular.z = std::clamp(2.0 * error, -1.2, 1.2);
+          command.angular.z = std::clamp(
+              recovery_turn_gain_ * error,
+              -recovery_max_angular_radps_,
+              recovery_max_angular_radps_);
           cmd_pub_->publish(command);
           return true;
         }
@@ -236,6 +243,8 @@ namespace
     };
     double recovery_speed_mps_;
     std::chrono::duration<double> recovery_drive_duration_;
+    double recovery_turn_gain_;
+    double recovery_max_angular_radps_;
     double recovery_stop_clearance_m_;
     double recovery_corridor_half_angle_rad_;
     std::vector<toy_rover::control::Point2D> path_;

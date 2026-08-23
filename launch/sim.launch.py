@@ -58,6 +58,11 @@ def _runtime_obstacle_sdf(obstacle_count, seed):
         </visual>
       </link>""")
 
+    if len(links) != obstacle_count:
+        raise RuntimeError(
+            f"could only place {len(links)} of {obstacle_count} runtime obstacles"
+        )
+
     return """<?xml version="1.0"?>
 <sdf version="1.9">
   <model name="runtime_obstacles">
@@ -244,7 +249,7 @@ def generate_launch_description():
         DeclareLaunchArgument("goal_snap_radius_m", default_value="1.0"),
         DeclareLaunchArgument("gz_args", default_value=["-r -v 4 ", world]),
         DeclareLaunchArgument("spawn_runtime_obstacles", default_value="true"),
-        DeclareLaunchArgument("runtime_obstacle_count", default_value="65"),
+        DeclareLaunchArgument("runtime_obstacle_count", default_value="110"),
         DeclareLaunchArgument("runtime_obstacle_seed", default_value="-1"),
         gazebo,
         robot_state_publisher,
