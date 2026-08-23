@@ -23,6 +23,7 @@ find_package(tf2_ros REQUIRED)
 add_library(${PROJECT_NAME}_core
   src/mapping/occupancy_grid.cpp
   src/mapping/obstacle_history.cpp
+  src/mapping/obstacle_inflation.cpp
   src/control/pose_history.cpp
   src/control/stuck_detector.cpp
   src/planning/astar.cpp
@@ -79,6 +80,10 @@ if(BUILD_TESTING)
   ament_add_gtest(test_obstacle_history test/test_obstacle_history.cpp)
   target_link_libraries(test_obstacle_history ${PROJECT_NAME}_core)
   target_include_directories(test_obstacle_history PRIVATE src)
+
+  ament_add_gtest(test_obstacle_inflation test/test_obstacle_inflation.cpp)
+  target_link_libraries(test_obstacle_inflation ${PROJECT_NAME}_core)
+  target_include_directories(test_obstacle_inflation PRIVATE src)
 
   ament_add_gtest(test_stuck_detector test/test_stuck_detector.cpp)
   target_link_libraries(test_stuck_detector ${PROJECT_NAME}_core)

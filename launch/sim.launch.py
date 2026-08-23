@@ -2,7 +2,7 @@ import math
 import random
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, OpaqueFunction
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, LogInfo, OpaqueFunction
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import Command, LaunchConfiguration, PathJoinSubstitution
@@ -16,25 +16,32 @@ def _runtime_obstacle_sdf(obstacle_count, seed):
         raise ValueError("runtime_obstacle_count must be between 0 and 200")
 
     rng = random.Random(seed)
-    obstacle_centers = []
+    obstacle_bounds = []
     links = []
     attempts = 0
 
     while len(links) < obstacle_count and attempts < obstacle_count * 50:
         attempts += 1
-        x = rng.uniform(-12.5, 12.5)
-        y = rng.uniform(-12.5, 12.5)
+        x = rng.uniform(-18.5, 18.5)
+        y = rng.uniform(-18.5, 18.5)
+        length = rng.uniform(0.5, 1.8)
+        width = rng.uniform(0.18, 0.50)
+        obstacle_radius = 0.5 * math.hypot(length, width)
 
-        # Keep the rover's spawn area open and avoid heavily overlapping blocks.
-        if math.hypot(x, y) < 2.0:
+        # Keep both the spawn and default goal open. Bounding-circle spacing
+        # prevents rotated boxes from overlapping each other.
+        if math.hypot(x, y) < 2.5:
             continue
-        if any(math.hypot(x - ox, y - oy) < 0.8 for ox, oy in obstacle_centers):
+        if math.hypot(x + 6.3, y + 6.1) < 2.0:
+            continue
+        if any(
+            math.hypot(x - ox, y - oy) < obstacle_radius + other_radius + 0.4
+            for ox, oy, other_radius in obstacle_bounds
+        ):
             continue
 
-        obstacle_centers.append((x, y))
+        obstacle_bounds.append((x, y, obstacle_radius))
         obstacle_id = len(links)
-        length = rng.uniform(0.5, 1.6)
-        width = rng.uniform(0.18, 0.45)
         yaw = rng.uniform(-math.pi, math.pi)
         links.append(f"""
       <link name="obstacle_{obstacle_id}">
@@ -63,21 +70,26 @@ def _runtime_obstacle_sdf(obstacle_count, seed):
 def _spawn_runtime_obstacles(context):
     obstacle_count = int(LaunchConfiguration("runtime_obstacle_count").perform(context))
     seed = int(LaunchConfiguration("runtime_obstacle_seed").perform(context))
+    if seed < 0:
+        seed = random.SystemRandom().randrange(0, 2**31)
     obstacle_sdf = _runtime_obstacle_sdf(obstacle_count, seed)
 
-    return [Node(
-        package="ros_gz_sim",
-        executable="create",
-        name="spawn_runtime_obstacles",
-        output="screen",
-        parameters=[{
-            "world": "mini_maze",
-            "string": obstacle_sdf,
-            "name": "runtime_obstacles",
-            "allow_renaming": False,
-        }],
-        condition=IfCondition(LaunchConfiguration("spawn_runtime_obstacles")),
-    )]
+    return [
+        LogInfo(msg=f"Runtime obstacle map seed: {seed}"),
+        Node(
+            package="ros_gz_sim",
+            executable="create",
+            name="spawn_runtime_obstacles",
+            output="screen",
+            parameters=[{
+                "world": "mini_maze",
+                "string": obstacle_sdf,
+                "name": "runtime_obstacles",
+                "allow_renaming": False,
+            }],
+            condition=IfCondition(LaunchConfiguration("spawn_runtime_obstacles")),
+        ),
+    ]
 
 
 def generate_launch_description():
@@ -86,6 +98,7 @@ def generate_launch_description():
     start_core_nodes = LaunchConfiguration("start_core_nodes")
     start_rviz = LaunchConfiguration("start_rviz")
     enable_stuck_recovery = LaunchConfiguration("enable_stuck_recovery")
+    obstacle_inflation_radius_m = LaunchConfiguration("obstacle_inflation_radius_m")
     gz_args = LaunchConfiguration("gz_args")
 
     world = PathJoinSubstitution([package_share, "worlds", "mini_maze.world"])
@@ -194,7 +207,10 @@ def generate_launch_description():
             executable="planner_node",
             name="planner_node",
             output="screen",
-            parameters=[{"use_sim_time": use_sim_time}],
+            parameters=[{
+                "use_sim_time": use_sim_time,
+                "obstacle_inflation_radius_m": obstacle_inflation_radius_m,
+            }],
             condition=IfCondition(start_core_nodes),
         ),
         Node(
@@ -212,10 +228,11 @@ def generate_launch_description():
         DeclareLaunchArgument("start_core_nodes", default_value="true"),
         DeclareLaunchArgument("start_rviz", default_value="true"),
         DeclareLaunchArgument("enable_stuck_recovery", default_value="false"),
+        DeclareLaunchArgument("obstacle_inflation_radius_m", default_value="0.33"),
         DeclareLaunchArgument("gz_args", default_value=["-r -v 4 ", world]),
-        DeclareLaunchArgument("spawn_runtime_obstacles", default_value="false"),
-        DeclareLaunchArgument("runtime_obstacle_count", default_value="40"),
-        DeclareLaunchArgument("runtime_obstacle_seed", default_value="7"),
+        DeclareLaunchArgument("spawn_runtime_obstacles", default_value="true"),
+        DeclareLaunchArgument("runtime_obstacle_count", default_value="65"),
+        DeclareLaunchArgument("runtime_obstacle_seed", default_value="-1"),
         gazebo,
         robot_state_publisher,
         spawn_rover,

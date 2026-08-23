@@ -9,9 +9,11 @@ Visualization Manager:
   Class: ""
   Displays:
     - Class: rviz_default_plugins/Grid
+      Cell Size: 1
       Enabled: true
       Name: Grid
       Plane: XY
+      Plane Cell Count: 40
       Reference Frame: map
     - Class: rviz_default_plugins/Map
       Enabled: true
@@ -58,7 +60,7 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz_default_plugins/Orbit
-      Distance: 10
+      Distance: 30
       Focal Point:
         X: 0
         Y: 0

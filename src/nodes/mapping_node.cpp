@@ -30,7 +30,7 @@ namespace
   public:
     MappingNode()
         : Node("mapping_node"),
-          grid_(280, 280, 0.1),
+          grid_(400, 400, 0.1),
           pose_history_(std::chrono::duration_cast<std::chrono::nanoseconds>(
               std::chrono::duration<double>(
                   declare_parameter<double>("odometry_history_seconds", 2.0)))),
@@ -211,7 +211,7 @@ namespace
     toy_rover::mapping::ObstacleHistory obstacle_history_;
     toy_rover::control::StuckDetector stuck_detector_;
     bool enable_stuck_recovery_;
-    toy_rover::control::Point2D grid_origin_{-14.0, -14.0};
+    toy_rover::control::Point2D grid_origin_{-20.0, -20.0};
     double lidar_offset_x_m_;
     double lidar_offset_y_m_;
     static constexpr std::size_t max_pending_scans_{20};

@@ -53,11 +53,15 @@ namespace toy_rover::planning
       mapping::GridIndex goal) const
   {
     if (!grid.in_bounds(start) || !grid.in_bounds(goal) ||
-        grid.at(start) == mapping::Cell::Occupied ||
         grid.at(goal) == mapping::Cell::Occupied)
     {
       return std::nullopt;
     }
+
+    // The robot can already be inside the conservative inflation halo because
+    // of grid quantization or tracking error. Seed the search there so it can
+    // move outward, but keep all neighboring occupied cells non-traversable.
+    // This does not permit a route to enter or cross inflated obstacles.
 
     std::priority_queue<Node, std::vector<Node>, NodeGreater> open;
     std::unordered_map<int, mapping::GridIndex> came_from;

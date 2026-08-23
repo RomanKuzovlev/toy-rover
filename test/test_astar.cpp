@@ -2,6 +2,7 @@
 #include "planning/astar.hpp"
 
 #include <gtest/gtest.h>
+#include <iterator>
 
 using toy_rover::mapping::Cell;
 using toy_rover::mapping::GridIndex;
@@ -34,6 +35,22 @@ TEST(AStar, ReturnsNoPathWhenGoalBlocked) {
   const auto path = AStar{}.plan(grid, {0, 0}, {2, 2});
 
   EXPECT_FALSE(path.has_value());
+}
+
+TEST(AStar, CanExitAnOccupiedStartCell) {
+  OccupancyGrid grid(4, 3, 0.1);
+  grid.set({0, 1}, Cell::Occupied);
+  grid.set({0, 0}, Cell::Occupied);
+  grid.set({0, 2}, Cell::Occupied);
+
+  const auto path = AStar{}.plan(grid, {0, 1}, {3, 1});
+
+  ASSERT_TRUE(path.has_value());
+  ASSERT_GE(path->size(), 2U);
+  EXPECT_EQ(path->front(), (GridIndex{0, 1}));
+  for (auto step = std::next(path->begin()); step != path->end(); ++step) {
+    EXPECT_NE(grid.at(*step), Cell::Occupied);
+  }
 }
 
 TEST(AStar, ReturnsNoPathWhenStartIsOutsideGrid) {

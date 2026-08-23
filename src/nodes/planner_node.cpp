@@ -3,11 +3,13 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <vector>
 
 #include "control/pure_pursuit.hpp"
 #include "geometry_msgs/msg/pose_stamped.hpp"
 #include "geometry_msgs/msg/quaternion.hpp"
+#include "mapping/obstacle_inflation.hpp"
 #include "nav_msgs/msg/occupancy_grid.hpp"
 #include "nav_msgs/msg/odometry.hpp"
 #include "nav_msgs/msg/path.hpp"
@@ -29,8 +31,15 @@ namespace
   {
   public:
     PlannerNode() : Node("planner_node"),
+                    obstacle_inflation_radius_m_(declare_parameter<double>(
+                        "obstacle_inflation_radius_m", 0.33)),
                     path_publisher_(create_publisher<nav_msgs::msg::Path>("planned_path", 10))
     {
+      if (obstacle_inflation_radius_m_ < 0.0)
+      {
+        throw std::invalid_argument("obstacle inflation radius must be non-negative");
+      }
+
       odom_sub_ = create_subscription<nav_msgs::msg::Odometry>(
           "odom",
           10,
@@ -79,7 +88,18 @@ namespace
       if (!route)
       {
         path_publisher_->publish(make_path_message({})); // send an empty msg as a signal to stop
-        RCLCPP_WARN(get_logger(), "Planner sends an empty msg as a signal to stop");
+        const bool start_occupied =
+            grid_.in_bounds(grid_start) &&
+            grid_.at(grid_start) == toy_rover::mapping::Cell::Occupied;
+        const bool goal_occupied =
+            grid_.in_bounds(grid_goal) &&
+            grid_.at(grid_goal) == toy_rover::mapping::Cell::Occupied;
+        RCLCPP_WARN_THROTTLE(
+            get_logger(), *get_clock(), 2000,
+            "No route; publishing stop (start in bounds=%d occupied=%d, "
+            "goal in bounds=%d occupied=%d)",
+            grid_.in_bounds(grid_start), start_occupied,
+            grid_.in_bounds(grid_goal), goal_occupied);
         return;
       }
 
@@ -153,6 +173,7 @@ namespace
         }
       }
 
+      toy_rover::mapping::inflate_occupied_cells(grid_, obstacle_inflation_radius_m_);
       has_map_ = true;
     }
 
@@ -195,14 +216,15 @@ namespace
       return path_msg;
     }
 
+    double obstacle_inflation_radius_m_;
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
     rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr grid_sub_;
     rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr goal_pose_sub_;
     rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_publisher_;
     std::optional<toy_rover::control::Pose2D> latest_pose_;
     bool has_map_{false};
-    toy_rover::control::Point2D grid_origin_{-14.0, -14.0};
-    toy_rover::mapping::OccupancyGrid grid_{280, 280, 0.1};
+    toy_rover::control::Point2D grid_origin_{-20.0, -20.0};
+    toy_rover::mapping::OccupancyGrid grid_{400, 400, 0.1};
     toy_rover::planning::AStar planner_;
     rclcpp::TimerBase::SharedPtr timer_;
   };

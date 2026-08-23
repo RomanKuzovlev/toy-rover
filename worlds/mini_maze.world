@@ -23,7 +23,7 @@
           <geometry>
             <plane>
               <normal>0 0 1</normal>
-              <size>32 32</size>
+              <size>40 40</size>
             </plane>
           </geometry>
         </collision>
@@ -31,7 +31,7 @@
           <geometry>
             <plane>
               <normal>0 0 1</normal>
-              <size>32 32</size>
+              <size>40 40</size>
             </plane>
           </geometry>
           <material>

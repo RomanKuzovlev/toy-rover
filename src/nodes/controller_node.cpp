@@ -29,8 +29,12 @@ namespace
   public:
     ControllerNode()
         : Node("controller_node"),
-          tracker_(0.35, 0.20),
-          limiter_(0.40, 1.5),
+          tracker_(
+              declare_parameter<double>("lookahead_m", 0.45),
+              declare_parameter<double>("cruise_speed_mps", 0.35)),
+          limiter_(
+              declare_parameter<double>("max_linear_speed_mps", 0.55),
+              declare_parameter<double>("max_angular_speed_radps", 1.8)),
           reverse_speed_mps_(declare_parameter<double>("unblock_reverse_speed_mps", 0.15)),
           reverse_duration_(rclcpp::Duration::from_seconds(
               declare_parameter<double>("unblock_reverse_duration_seconds", 1.0))),
