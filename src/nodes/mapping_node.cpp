@@ -30,7 +30,7 @@ namespace
   public:
     MappingNode()
         : Node("mapping_node"),
-          grid_(400, 400, 0.1),
+          grid_(800, 800, 0.05),
           pose_history_(std::chrono::duration_cast<std::chrono::nanoseconds>(
               std::chrono::duration<double>(
                   declare_parameter<double>("odometry_history_seconds", 2.0)))),

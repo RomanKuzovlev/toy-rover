@@ -14,6 +14,7 @@
 #include "nav_msgs/msg/odometry.hpp"
 #include "nav_msgs/msg/path.hpp"
 #include "planning/astar.hpp"
+#include "planning/path_simplifier.hpp"
 #include "rclcpp/rclcpp.hpp"
 
 namespace
@@ -103,8 +104,10 @@ namespace
         return;
       }
 
-      world_path.reserve(route->size());
-      for (const auto cell : *route)
+      const auto simplified_route =
+          toy_rover::planning::simplify_path(grid_, *route);
+      world_path.reserve(simplified_route.size());
+      for (const auto cell : simplified_route)
       {
         world_path.push_back(grid_to_world(cell));
       }
@@ -224,7 +227,7 @@ namespace
     std::optional<toy_rover::control::Pose2D> latest_pose_;
     bool has_map_{false};
     toy_rover::control::Point2D grid_origin_{-20.0, -20.0};
-    toy_rover::mapping::OccupancyGrid grid_{400, 400, 0.1};
+    toy_rover::mapping::OccupancyGrid grid_{800, 800, 0.05};
     toy_rover::planning::AStar planner_;
     rclcpp::TimerBase::SharedPtr timer_;
   };

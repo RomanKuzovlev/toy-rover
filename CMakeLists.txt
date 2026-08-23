@@ -27,6 +27,7 @@ add_library(${PROJECT_NAME}_core
   src/control/pose_history.cpp
   src/control/stuck_detector.cpp
   src/planning/astar.cpp
+  src/planning/path_simplifier.cpp
   src/control/pure_pursuit.cpp
   src/control/velocity_limiter.cpp
 )
