@@ -26,8 +26,12 @@ add_library(${PROJECT_NAME}_core
   src/mapping/obstacle_inflation.cpp
   src/control/pose_history.cpp
   src/control/stuck_detector.cpp
+  src/control/free_space_escape.cpp
+  src/control/timestamp_gate.cpp
   src/planning/astar.cpp
   src/planning/path_simplifier.cpp
+  src/planning/start_escape.cpp
+  src/planning/goal_resolver.cpp
   src/control/pure_pursuit.cpp
   src/control/velocity_limiter.cpp
 )
@@ -43,6 +47,7 @@ foreach(node
   mapping_node
   planner_node
   controller_node
+  odometry_filter_node
   odom_tf_broadcaster_node
 )
   add_executable(${node} src/nodes/${node}.cpp)
@@ -57,6 +62,7 @@ install(TARGETS
   mapping_node
   planner_node
   controller_node
+  odometry_filter_node
   odom_tf_broadcaster_node
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib

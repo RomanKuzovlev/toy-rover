@@ -31,17 +31,10 @@ namespace toy_rover::control
       return {};
     }
 
-    Point2D target = path.back();
-    for (const auto &point : path)
-    {
-      const double dx = point.x - pose.x;
-      const double dy = point.y - pose.y;
-      if (std::hypot(dx, dy) >= lookahead_m_)
-      {
-        target = point;
-        break;
-      }
-    }
+    // The planner has already simplified the path into collision-checked
+    // visible segments. Hold the immediate next waypoint instead of skipping
+    // over a nearby corner: skipping rounds the turn through inflated cells.
+    const Point2D target = path.size() > 1 ? path[1] : path.back();
 
     const double dx = target.x - pose.x;
     const double dy = target.y - pose.y;
@@ -53,10 +46,13 @@ namespace toy_rover::control
     // Do not drive a forward arc when the path is substantially behind the
     // rover. Turn first, then advance with speed reduced by heading error.
     constexpr double rotate_in_place_threshold_rad = 0.8;
+    const double waypoint_speed_scale =
+        std::min(1.0, std::hypot(dx, dy) / lookahead_m_);
     const double linear_speed =
         std::abs(heading_error) >= rotate_in_place_threshold_rad
             ? 0.0
-            : nominal_speed_mps_ * std::max(0.25, std::cos(heading_error));
+            : nominal_speed_mps_ * std::max(0.25, std::cos(heading_error)) *
+                  waypoint_speed_scale;
 
     return {linear_speed, 2.0 * heading_error};
   }

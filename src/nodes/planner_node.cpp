@@ -1,6 +1,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <iterator>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -14,8 +15,11 @@
 #include "nav_msgs/msg/odometry.hpp"
 #include "nav_msgs/msg/path.hpp"
 #include "planning/astar.hpp"
+#include "planning/goal_resolver.hpp"
 #include "planning/path_simplifier.hpp"
+#include "planning/start_escape.hpp"
 #include "rclcpp/rclcpp.hpp"
+#include "std_msgs/msg/empty.hpp"
 
 namespace
 {
@@ -34,11 +38,22 @@ namespace
     PlannerNode() : Node("planner_node"),
                     obstacle_inflation_radius_m_(declare_parameter<double>(
                         "obstacle_inflation_radius_m", 0.33)),
-                    path_publisher_(create_publisher<nav_msgs::msg::Path>("planned_path", 10))
+                    escape_inflation_radius_m_(declare_parameter<double>(
+                        "escape_inflation_radius_m", 0.295)),
+                    goal_snap_radius_m_(declare_parameter<double>(
+                        "goal_snap_radius_m", 1.0)),
+                    path_publisher_(create_publisher<nav_msgs::msg::Path>("planned_path", 10)),
+                    recovery_publisher_(create_publisher<std_msgs::msg::Empty>("unblock", 10))
     {
-      if (obstacle_inflation_radius_m_ < 0.0)
+      if (escape_inflation_radius_m_ < 0.0 ||
+          escape_inflation_radius_m_ > obstacle_inflation_radius_m_)
       {
-        throw std::invalid_argument("obstacle inflation radius must be non-negative");
+        throw std::invalid_argument(
+            "escape inflation radius must be non-negative and no greater than normal inflation");
+      }
+      if (goal_snap_radius_m_ < 0.0)
+      {
+        throw std::invalid_argument("goal snap radius must be non-negative");
       }
 
       odom_sub_ = create_subscription<nav_msgs::msg::Odometry>(
@@ -81,20 +96,94 @@ namespace
 
       const toy_rover::control::Point2D world_start{latest_pose_->x, latest_pose_->y};
       const auto grid_start = world_to_grid(world_start);
-      const auto grid_goal = world_to_grid(goal_);
+      const auto requested_grid_goal = world_to_grid(goal_);
+      auto planning_start = grid_start;
+      std::optional<toy_rover::planning::Path> escape;
+      if (grid_.in_bounds(grid_start) &&
+          grid_.at(grid_start) == toy_rover::mapping::Cell::Occupied)
+      {
+        escape = toy_rover::planning::find_path_out_of_inflation(
+            escape_grid_, grid_, grid_start);
+        if (escape)
+        {
+          planning_start = escape->back();
+        }
+      }
+
+      auto grid_goal = requested_grid_goal;
+      std::optional<toy_rover::planning::Path> continuation;
+      if (adjusted_goal_)
+      {
+        const auto adjusted_grid_goal = world_to_grid(*adjusted_goal_);
+        if (grid_.in_bounds(adjusted_grid_goal) &&
+            grid_.at(adjusted_grid_goal) != toy_rover::mapping::Cell::Occupied)
+        {
+          grid_goal = adjusted_grid_goal;
+          continuation = planner_.plan(grid_, planning_start, grid_goal);
+        }
+        else
+        {
+          adjusted_goal_.reset();
+        }
+      }
+
+      if (!adjusted_goal_ && grid_.in_bounds(requested_grid_goal) &&
+          grid_.at(requested_grid_goal) == toy_rover::mapping::Cell::Occupied)
+      {
+        auto resolved_goal = toy_rover::planning::resolve_reachable_goal(
+            grid_, planning_start, requested_grid_goal, goal_snap_radius_m_);
+        if (resolved_goal)
+        {
+          grid_goal = resolved_goal->cell;
+          continuation = std::move(resolved_goal->path);
+          const auto adjusted_world_goal = grid_to_world(grid_goal);
+          adjusted_goal_ = adjusted_world_goal;
+          RCLCPP_WARN_THROTTLE(
+              get_logger(), *get_clock(), 2000,
+              "Requested goal is occupied; planning to nearest reachable free point "
+              "x=%.2f y=%.2f",
+              adjusted_world_goal.x, adjusted_world_goal.y);
+        }
+      }
+      else if (!adjusted_goal_ && grid_.in_bounds(requested_grid_goal))
+      {
+        continuation = planner_.plan(grid_, planning_start, grid_goal);
+      }
 
       std::vector<toy_rover::control::Point2D> world_path;
-
-      auto route = planner_.plan(grid_, grid_start, grid_goal);
+      std::optional<toy_rover::planning::Path> route;
+      std::size_t escape_size = 0;
+      if (continuation)
+      {
+        if (escape)
+        {
+          auto simplified_escape =
+              toy_rover::planning::simplify_path(escape_grid_, *escape);
+          const auto simplified_continuation =
+              toy_rover::planning::simplify_path(grid_, *continuation);
+          escape_size = simplified_escape.size();
+          simplified_escape.insert(
+              simplified_escape.end(),
+              std::next(simplified_continuation.begin()),
+              simplified_continuation.end());
+          route = std::move(simplified_escape);
+        }
+        else if (grid_.in_bounds(grid_start) &&
+                 grid_.at(grid_start) != toy_rover::mapping::Cell::Occupied)
+        {
+          route = toy_rover::planning::simplify_path(grid_, *continuation);
+        }
+      }
       if (!route)
       {
         path_publisher_->publish(make_path_message({})); // send an empty msg as a signal to stop
+        request_local_recovery();
         const bool start_occupied =
             grid_.in_bounds(grid_start) &&
             grid_.at(grid_start) == toy_rover::mapping::Cell::Occupied;
         const bool goal_occupied =
-            grid_.in_bounds(grid_goal) &&
-            grid_.at(grid_goal) == toy_rover::mapping::Cell::Occupied;
+            grid_.in_bounds(requested_grid_goal) &&
+            grid_.at(requested_grid_goal) == toy_rover::mapping::Cell::Occupied;
         RCLCPP_WARN_THROTTLE(
             get_logger(), *get_clock(), 2000,
             "No route; publishing stop (start in bounds=%d occupied=%d, "
@@ -104,15 +193,35 @@ namespace
         return;
       }
 
-      const auto simplified_route =
-          toy_rover::planning::simplify_path(grid_, *route);
-      world_path.reserve(simplified_route.size());
-      for (const auto cell : simplified_route)
+      if (escape)
+      {
+        RCLCPP_WARN_THROTTLE(
+            get_logger(), *get_clock(), 2000,
+            "Rover is inside normal obstacle inflation; using %zu-point escape segment",
+            escape_size);
+      }
+      world_path.reserve(route->size());
+      for (const auto cell : *route)
       {
         world_path.push_back(grid_to_world(cell));
       }
 
       path_publisher_->publish(make_path_message(world_path));
+    }
+
+    void request_local_recovery()
+    {
+      const auto timestamp = std::chrono::steady_clock::now();
+      constexpr auto request_interval = std::chrono::seconds{3};
+      if (last_recovery_request_ &&
+          timestamp - *last_recovery_request_ < request_interval)
+      {
+        return;
+      }
+
+      last_recovery_request_ = timestamp;
+      recovery_publisher_->publish(std_msgs::msg::Empty{});
+      RCLCPP_WARN(get_logger(), "No global route; requesting local free-space escape");
     }
 
     void on_odometry(const nav_msgs::msg::Odometry &msg)
@@ -132,6 +241,7 @@ namespace
     void set_goal(double x, double y)
     {
       goal_ = toy_rover::control::Point2D{x, y};
+      adjusted_goal_.reset();
       RCLCPP_INFO(get_logger(), "planner goal set to x=%.2f y=%.2f", goal_.x, goal_.y);
     }
 
@@ -176,6 +286,9 @@ namespace
         }
       }
 
+      escape_grid_ = grid_;
+      toy_rover::mapping::inflate_occupied_cells(
+          escape_grid_, escape_inflation_radius_m_);
       toy_rover::mapping::inflate_occupied_cells(grid_, obstacle_inflation_radius_m_);
       has_map_ = true;
     }
@@ -220,14 +333,20 @@ namespace
     }
 
     double obstacle_inflation_radius_m_;
+    double escape_inflation_radius_m_;
+    double goal_snap_radius_m_;
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
     rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr grid_sub_;
     rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr goal_pose_sub_;
     rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_publisher_;
+    rclcpp::Publisher<std_msgs::msg::Empty>::SharedPtr recovery_publisher_;
     std::optional<toy_rover::control::Pose2D> latest_pose_;
+    std::optional<toy_rover::control::Point2D> adjusted_goal_;
+    std::optional<std::chrono::steady_clock::time_point> last_recovery_request_;
     bool has_map_{false};
     toy_rover::control::Point2D grid_origin_{-20.0, -20.0};
     toy_rover::mapping::OccupancyGrid grid_{800, 800, 0.05};
+    toy_rover::mapping::OccupancyGrid escape_grid_{800, 800, 0.05};
     toy_rover::planning::AStar planner_;
     rclcpp::TimerBase::SharedPtr timer_;
   };

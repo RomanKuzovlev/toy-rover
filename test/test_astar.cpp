@@ -1,6 +1,8 @@
 #include "mapping/occupancy_grid.hpp"
 #include "planning/astar.hpp"
+#include "planning/goal_resolver.hpp"
 #include "planning/path_simplifier.hpp"
+#include "planning/start_escape.hpp"
 
 #include <gtest/gtest.h>
 #include <iterator>
@@ -12,6 +14,9 @@ using toy_rover::planning::AStar;
 using toy_rover::planning::Path;
 using toy_rover::planning::has_line_of_sight;
 using toy_rover::planning::simplify_path;
+using toy_rover::planning::find_path_out_of_inflation;
+using toy_rover::planning::find_nearest_free_cell;
+using toy_rover::planning::resolve_reachable_goal;
 
 TEST(AStar, FindsPathAroundObstacle) {
   OccupancyGrid grid(5, 5, 0.1);
@@ -105,6 +110,75 @@ TEST(PathSimplifier, DoesNotPassThroughACellCorner) {
   grid.set({1, 0}, Cell::Occupied);
 
   EXPECT_FALSE(has_line_of_sight(grid, {0, 0}, {1, 1}));
+}
+
+TEST(StartEscape, CrossesOnlyTheTighterRecoveryLayer) {
+  OccupancyGrid navigation_grid(7, 5, 0.05);
+  OccupancyGrid recovery_grid(7, 5, 0.05);
+  for (int y = 0; y < 5; ++y) {
+    navigation_grid.set({0, y}, Cell::Occupied);
+    navigation_grid.set({1, y}, Cell::Occupied);
+    navigation_grid.set({2, y}, Cell::Occupied);
+    recovery_grid.set({0, y}, Cell::Occupied);
+  }
+
+  const auto escape = find_path_out_of_inflation(
+      recovery_grid, navigation_grid, {1, 2});
+
+  ASSERT_TRUE(escape.has_value());
+  EXPECT_EQ(escape->front(), (GridIndex{1, 2}));
+  EXPECT_EQ(escape->back().x, 3);
+  EXPECT_NE(navigation_grid.at(escape->back()), Cell::Occupied);
+  for (auto step = std::next(escape->begin()); step != escape->end(); ++step) {
+    EXPECT_NE(recovery_grid.at(*step), Cell::Occupied);
+  }
+}
+
+TEST(StartEscape, RefusesToCrossTheRecoveryFootprint) {
+  OccupancyGrid navigation_grid(3, 3, 0.05);
+  OccupancyGrid recovery_grid(3, 3, 0.05);
+  navigation_grid.fill(Cell::Occupied);
+  recovery_grid.fill(Cell::Occupied);
+
+  EXPECT_FALSE(find_path_out_of_inflation(
+      recovery_grid, navigation_grid, {1, 1}).has_value());
+}
+
+TEST(GoalResolver, KeepsAFreeRequestedGoal) {
+  OccupancyGrid grid(3, 3, 0.05);
+
+  EXPECT_EQ(find_nearest_free_cell(grid, {1, 1}, 1.0), (GridIndex{1, 1}));
+}
+
+TEST(GoalResolver, MovesAnOccupiedGoalToTheNearestFreeCell) {
+  OccupancyGrid grid(5, 5, 0.05);
+  grid.fill(Cell::Occupied);
+  grid.set({3, 2}, Cell::Free);
+  grid.set({4, 2}, Cell::Free);
+
+  EXPECT_EQ(find_nearest_free_cell(grid, {2, 2}, 0.2), (GridIndex{3, 2}));
+}
+
+TEST(GoalResolver, RespectsMaximumAdjustmentDistance) {
+  OccupancyGrid grid(5, 5, 0.05);
+  grid.fill(Cell::Occupied);
+  grid.set({4, 2}, Cell::Free);
+
+  EXPECT_FALSE(find_nearest_free_cell(grid, {2, 2}, 0.09).has_value());
+}
+
+TEST(GoalResolver, SelectsTheReachableSideOfAnOccupiedGoal) {
+  OccupancyGrid grid(7, 5, 0.05);
+  for (int y = 0; y < 5; ++y) {
+    grid.set({3, y}, Cell::Occupied);
+  }
+
+  const auto resolved = resolve_reachable_goal(grid, {0, 2}, {3, 2}, 0.2);
+
+  ASSERT_TRUE(resolved.has_value());
+  EXPECT_LT(resolved->cell.x, 3);
+  EXPECT_EQ(resolved->path.front(), (GridIndex{0, 2}));
+  EXPECT_EQ(resolved->path.back(), resolved->cell);
 }
 
 TEST(AStar, ReturnsNoPathWhenStartIsOutsideGrid) {

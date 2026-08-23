@@ -99,6 +99,8 @@ def generate_launch_description():
     start_rviz = LaunchConfiguration("start_rviz")
     enable_stuck_recovery = LaunchConfiguration("enable_stuck_recovery")
     obstacle_inflation_radius_m = LaunchConfiguration("obstacle_inflation_radius_m")
+    escape_inflation_radius_m = LaunchConfiguration("escape_inflation_radius_m")
+    goal_snap_radius_m = LaunchConfiguration("goal_snap_radius_m")
     gz_args = LaunchConfiguration("gz_args")
 
     world = PathJoinSubstitution([package_share, "worlds", "mini_maze.world"])
@@ -186,6 +188,13 @@ def generate_launch_description():
     core_nodes = [
         Node(
             package="toy_rover",
+            executable="odometry_filter_node",
+            name="odometry_filter",
+            output="screen",
+            parameters=[{"use_sim_time": use_sim_time}],
+        ),
+        Node(
+            package="toy_rover",
             executable="odom_tf_broadcaster_node",
             name="odom_tf_broadcaster",
             output="screen",
@@ -210,6 +219,8 @@ def generate_launch_description():
             parameters=[{
                 "use_sim_time": use_sim_time,
                 "obstacle_inflation_radius_m": obstacle_inflation_radius_m,
+                "escape_inflation_radius_m": escape_inflation_radius_m,
+                "goal_snap_radius_m": goal_snap_radius_m,
             }],
             condition=IfCondition(start_core_nodes),
         ),
@@ -229,6 +240,8 @@ def generate_launch_description():
         DeclareLaunchArgument("start_rviz", default_value="true"),
         DeclareLaunchArgument("enable_stuck_recovery", default_value="false"),
         DeclareLaunchArgument("obstacle_inflation_radius_m", default_value="0.33"),
+        DeclareLaunchArgument("escape_inflation_radius_m", default_value="0.295"),
+        DeclareLaunchArgument("goal_snap_radius_m", default_value="1.0"),
         DeclareLaunchArgument("gz_args", default_value=["-r -v 4 ", world]),
         DeclareLaunchArgument("spawn_runtime_obstacles", default_value="true"),
         DeclareLaunchArgument("runtime_obstacle_count", default_value="65"),

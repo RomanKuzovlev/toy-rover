@@ -5,12 +5,14 @@
 #include <gtest/gtest.h>
 
 #include "control/pose_history.hpp"
+#include "control/timestamp_gate.hpp"
 
 namespace
 {
   using namespace std::chrono_literals;
   using toy_rover::control::Pose2D;
   using toy_rover::control::PoseHistory;
+  using toy_rover::control::TimestampGate;
 
   TEST(PoseHistory, InterpolatesPoseAtRequestedTimestamp)
   {
@@ -58,5 +60,25 @@ namespace
     const auto pose = history.interpolate(1s);
     ASSERT_TRUE(pose.has_value());
     EXPECT_DOUBLE_EQ(pose->x, 1.0);
+  }
+
+  TEST(TimestampGate, DropsDuplicateAndOlderMessages)
+  {
+    TimestampGate gate;
+
+    EXPECT_TRUE(gate.accept(1s, 1s));
+    EXPECT_TRUE(gate.accept(2s, 2s));
+    EXPECT_FALSE(gate.accept(2s, 3s));
+    EXPECT_FALSE(gate.accept(1500ms, 3s));
+    EXPECT_TRUE(gate.accept(3s, 3s));
+  }
+
+  TEST(TimestampGate, AcceptsANewSequenceAfterClockReset)
+  {
+    TimestampGate gate;
+
+    EXPECT_TRUE(gate.accept(10s, 10s));
+    EXPECT_TRUE(gate.accept(1s, 1s));
+    EXPECT_TRUE(gate.accept(2s, 2s));
   }
 } // namespace

@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <memory>
@@ -5,12 +6,14 @@
 #include <stdexcept>
 #include <vector>
 
+#include "control/free_space_escape.hpp"
 #include "control/pure_pursuit.hpp"
 #include "control/velocity_limiter.hpp"
 #include "geometry_msgs/msg/twist.hpp"
 #include "nav_msgs/msg/odometry.hpp"
 #include "nav_msgs/msg/path.hpp"
 #include "rclcpp/rclcpp.hpp"
+#include "sensor_msgs/msg/laser_scan.hpp"
 #include "std_msgs/msg/empty.hpp"
 
 using namespace std::chrono_literals;
@@ -35,14 +38,19 @@ namespace
           limiter_(
               declare_parameter<double>("max_linear_speed_mps", 0.55),
               declare_parameter<double>("max_angular_speed_radps", 1.8)),
-          reverse_speed_mps_(declare_parameter<double>("unblock_reverse_speed_mps", 0.15)),
-          reverse_duration_(rclcpp::Duration::from_seconds(
-              declare_parameter<double>("unblock_reverse_duration_seconds", 1.0))),
+          recovery_speed_mps_(declare_parameter<double>("recovery_speed_mps", 0.22)),
+          recovery_drive_duration_(declare_parameter<double>(
+              "recovery_drive_duration_seconds", 1.5)),
+          recovery_stop_clearance_m_(declare_parameter<double>(
+              "recovery_stop_clearance_m", 0.45)),
+          recovery_corridor_half_angle_rad_(declare_parameter<double>(
+              "recovery_corridor_half_angle_rad", 0.25)),
           cmd_pub_(create_publisher<geometry_msgs::msg::Twist>("cmd_vel", 10))
     {
-      if (reverse_speed_mps_ <= 0.0 || reverse_duration_.nanoseconds() <= 0)
+      if (recovery_speed_mps_ <= 0.0 || recovery_drive_duration_.count() <= 0.0 ||
+          recovery_stop_clearance_m_ <= 0.0 || recovery_corridor_half_angle_rad_ <= 0.0)
       {
-        throw std::invalid_argument("unblock reverse speed and duration must be positive");
+        throw std::invalid_argument("recovery parameters must be positive");
       }
 
       odom_sub_ = create_subscription<nav_msgs::msg::Odometry>(
@@ -58,6 +66,13 @@ namespace
           [this](const nav_msgs::msg::Path::SharedPtr msg)
           {
             on_path(*msg);
+          });
+      scan_sub_ = create_subscription<sensor_msgs::msg::LaserScan>(
+          "scan",
+          10,
+          [this](const sensor_msgs::msg::LaserScan::SharedPtr msg)
+          {
+            latest_scan_ = *msg;
           });
       unblock_sub_ = create_subscription<std_msgs::msg::Empty>(
           "unblock",
@@ -83,18 +98,9 @@ namespace
         return;
       }
 
-      if (reverse_started_at_)
+      if (run_recovery())
       {
-        const auto elapsed = now() - *reverse_started_at_;
-        if (elapsed >= rclcpp::Duration::from_nanoseconds(0) && elapsed < reverse_duration_)
-        {
-          geometry_msgs::msg::Twist reverse;
-          reverse.linear.x = -reverse_speed_mps_;
-          cmd_pub_->publish(reverse);
-          return;
-        }
-        reverse_started_at_.reset();
-        RCLCPP_INFO(get_logger(), "Unblock reverse maneuver finished; resuming path tracking");
+        return;
       }
 
       const auto limited = limiter_.limit(tracker_.compute_command(*latest_pose_, path_));
@@ -129,13 +135,90 @@ namespace
 
     void on_unblock()
     {
-      if (reverse_started_at_)
+      if (recovery_phase_ != RecoveryPhase::Idle)
       {
         return;
       }
+      if (!latest_pose_ || !latest_scan_)
+      {
+        RCLCPP_WARN(get_logger(), "Cannot start local escape without odometry and lidar");
+        return;
+      }
 
-      reverse_started_at_ = now();
-      RCLCPP_WARN(get_logger(), "Unblock event received; reversing temporarily");
+      const auto relative_heading = toy_rover::control::choose_free_space_heading(
+          latest_scan_->ranges,
+          latest_scan_->angle_min,
+          latest_scan_->angle_increment,
+          latest_scan_->range_min,
+          latest_scan_->range_max,
+          recovery_corridor_half_angle_rad_);
+      if (!relative_heading)
+      {
+        RCLCPP_WARN(get_logger(), "Cannot find a usable lidar direction for local escape");
+        return;
+      }
+
+      recovery_target_yaw_rad_ = normalize_angle(
+          latest_pose_->yaw_rad + *relative_heading);
+      recovery_phase_ = RecoveryPhase::Turning;
+      RCLCPP_WARN(
+          get_logger(), "Local escape selected lidar heading %.2f rad", *relative_heading);
+    }
+
+    bool run_recovery()
+    {
+      if (recovery_phase_ == RecoveryPhase::Idle)
+      {
+        return false;
+      }
+
+      if (recovery_phase_ == RecoveryPhase::Turning)
+      {
+        const double error = normalize_angle(recovery_target_yaw_rad_ - latest_pose_->yaw_rad);
+        constexpr double heading_tolerance_rad = 0.12;
+        if (std::abs(error) > heading_tolerance_rad)
+        {
+          geometry_msgs::msg::Twist command;
+          command.angular.z = std::clamp(2.0 * error, -1.2, 1.2);
+          cmd_pub_->publish(command);
+          return true;
+        }
+        recovery_phase_ = RecoveryPhase::Driving;
+        recovery_drive_started_at_ = std::chrono::steady_clock::now();
+        publish_stop();
+        return true;
+      }
+
+      const double clearance = latest_scan_
+                                   ? toy_rover::control::forward_clearance(
+                                         latest_scan_->ranges,
+                                         latest_scan_->angle_min,
+                                         latest_scan_->angle_increment,
+                                         latest_scan_->range_min,
+                                         latest_scan_->range_max,
+                                         recovery_corridor_half_angle_rad_)
+                                   : 0.0;
+      const auto elapsed = std::chrono::steady_clock::now() - *recovery_drive_started_at_;
+      if (elapsed >= recovery_drive_duration_ ||
+          clearance < recovery_stop_clearance_m_)
+      {
+        recovery_phase_ = RecoveryPhase::Idle;
+        recovery_drive_started_at_.reset();
+        publish_stop();
+        RCLCPP_INFO(
+            get_logger(), "Local escape finished (forward clearance %.2f m)", clearance);
+        return true;
+      }
+
+      geometry_msgs::msg::Twist command;
+      command.linear.x = recovery_speed_mps_;
+      cmd_pub_->publish(command);
+      return true;
+    }
+
+    static double normalize_angle(double angle)
+    {
+      return std::atan2(std::sin(angle), std::cos(angle));
     }
 
     void publish_stop()
@@ -145,15 +228,27 @@ namespace
 
     toy_rover::control::PurePursuit tracker_;
     toy_rover::control::VelocityLimiter limiter_;
-    double reverse_speed_mps_;
-    rclcpp::Duration reverse_duration_;
+    enum class RecoveryPhase
+    {
+      Idle,
+      Turning,
+      Driving,
+    };
+    double recovery_speed_mps_;
+    std::chrono::duration<double> recovery_drive_duration_;
+    double recovery_stop_clearance_m_;
+    double recovery_corridor_half_angle_rad_;
     std::vector<toy_rover::control::Point2D> path_;
     std::optional<toy_rover::control::Pose2D> latest_pose_;
-    std::optional<rclcpp::Time> reverse_started_at_;
+    std::optional<sensor_msgs::msg::LaserScan> latest_scan_;
+    RecoveryPhase recovery_phase_{RecoveryPhase::Idle};
+    double recovery_target_yaw_rad_{0.0};
+    std::optional<std::chrono::steady_clock::time_point> recovery_drive_started_at_;
     rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_pub_;
     rclcpp::TimerBase::SharedPtr timer_;
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
     rclcpp::Subscription<nav_msgs::msg::Path>::SharedPtr path_sub_;
+    rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr scan_sub_;
     rclcpp::Subscription<std_msgs::msg::Empty>::SharedPtr unblock_sub_;
   };
 } // namespace
